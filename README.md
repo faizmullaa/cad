@@ -1,33 +1,36 @@
-# PDF + CAD Register — Windows EXE
+# PDF + CAD Register — Standalone Windows EXE
 
-This repository builds a Windows desktop executable through GitHub Actions.
+The GitHub Actions workflow builds a Windows 64-bit one-file EXE and bundles
+LibreDWG so a separate ODA File Converter installation is not required.
 
-## Download the EXE
+## Download
 
 1. Open the repository's **Actions** tab.
-2. Select the latest **Build Windows EXE** run.
-3. Wait for the run to finish with a green check.
-4. Under **Artifacts**, download **PDF-and-CAD-Register-Windows**.
-5. Extract the downloaded ZIP. It contains **PDF and CAD Register.exe**.
+2. Open the newest successful **Build Windows EXE** run.
+3. Download the artifact **PDF-and-CAD-Register-Windows-Standalone**.
+4. Extract the artifact ZIP.
+5. Run **PDF and CAD Register.exe**.
 
-The workflow runs on every push to `main` and can also be started manually with **Actions → Build Windows EXE → Run workflow**.
+The package also contains LibreDWG's GPL-3.0-or-later licence and corresponding
+source archive, as required for redistribution of the bundled converter.
 
-## What the app does
+## DWG conversion
 
-Select a folder and scan its PDF and DWG files (including subfolders) to create an Excel workbook with Documents, Drawings, Shop Drawings and Summary sheets. Rows with mismatches are marked for review; incomplete or unreadable files are marked CHECK.
+The EXE bundles LibreDWG's `dwg2dxf.exe` and DLLs. It uses LibreDWG first;
+ODA File Converter is only an optional fallback. AutoCAD and a separately
+installed ODA converter should not be required by this package.
 
-## Important DWG requirement
+LibreDWG currently documents approximately 90% coverage. Some complex,
+proxy, raster, or unsupported entities may not convert. The application must
+mark unreadable/incomplete drawings for manual review.
 
-The application does not include a DWG conversion engine. For DWG text/title-block extraction, install a compatible DWG-to-DXF converter on the Windows computer that runs the app, such as [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter). AutoCAD is not required. Converter availability and its own licensing/redistribution terms should be checked separately.
+## Test and validation status
 
-If a converter is unavailable or cannot read a file, the app should show the DWG row as CHECK. The EXE build succeeding does not prove DWG extraction works for every DWG.
+The supplied sample PDF has title `DATA CENTER - GROUND FLOOR FORMWORK`,
+serial `ST111`, date `27/10/26`, and title-block revision `00`. Its filename
+ends in `_01`, so the revision should be marked as a mismatch.
 
-## Validation note
-
-The app checks filename serial/drawing numbers against values extracted from title blocks. It also compares the filename revision suffix (for example, `_01`) with the revision extracted from the drawing title block. Both values are displayed separately in the Drawings and Shop Drawings sheets.
-
-The supplied PDF test sample has filename suffix `_01` and title-block revision `00`; the revised code should mark this as MISMATCH. Confirm against project drawings before operational use.
-
-## Build details
-
-GitHub Actions uses a Windows runner and Python 3.11 to restore the compressed Python source, install dependencies and build a one-file GUI executable using PyInstaller. The application source payload is stored as `build_payload.py.xz.b64` and decoded during the workflow.
+The supplied DWG was previously detected but not parsed because no converter
+was available in the test environment. The new Windows workflow verifies the
+bundled converter itself (`dwg2dxf --version`) but cannot claim the supplied
+project DWG was parsed until that exact file has been tested with this EXE.
