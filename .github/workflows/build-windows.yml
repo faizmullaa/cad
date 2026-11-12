@@ -74,11 +74,17 @@ jobs:
         shell: pwsh
         run: |
           $exe = Join-Path $PWD "dist/PDF and CAD Register.exe"
-          $diagnostic = & $exe --check-converter 2>&1
-          $diagnostic | ForEach-Object { Write-Host $_ }
-          if ($LASTEXITCODE -ne 0) { throw "The EXE cannot start its bundled LibreDWG converter." }
-          if (($diagnostic -join "`n") -notmatch "BUNDLED_CONVERTER_OK") {
-            throw "The EXE did not report BUNDLED_CONVERTER_OK. The converter was not packaged or found."
+          $report = Join-Path $env:RUNNER_TEMP "bundled-converter-check.txt"
+          Remove-Item $report -ErrorAction SilentlyContinue
+          & $exe --check-converter $report
+          $exitCode = $LASTEXITCODE
+          if (-not (Test-Path $report)) {
+            throw "The EXE did not write its converter diagnostic file. Exit code: $exitCode"
+          }
+          $diagnostic = Get-Content $report -Raw
+          Write-Host $diagnostic
+          if ($exitCode -ne 0 -or $diagnostic -notmatch "BUNDLED_CONVERTER_OK") {
+            throw "The packaged EXE could not locate and start its bundled LibreDWG converter."
           }
 
       - name: Assemble redistribution and licence materials
