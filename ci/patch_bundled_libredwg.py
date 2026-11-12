@@ -321,15 +321,23 @@ if main_marker not in source:
 source = source.replace(
     main_marker,
     main_marker + '''    if len(sys.argv) > 1 and sys.argv[1] == "--check-converter":
+        import tempfile
+        report_path = (
+            sys.argv[2] if len(sys.argv) > 2
+            else os.path.join(tempfile.gettempdir(), "pdf_cad_converter_check.txt")
+        )
         try:
             converter, version = _check_bundled_converter()
-            print("BUNDLED_CONVERTER_OK")
-            print("PATH=" + converter)
-            print("VERSION=" + version)
-            return
+            report = "BUNDLED_CONVERTER_OK\\nPATH=" + converter + "\\nVERSION=" + version + "\\n"
+            exit_code = 0
         except Exception as exc:
-            print("BUNDLED_CONVERTER_ERROR: " + str(exc))
-            sys.exit(2)
+            report = "BUNDLED_CONVERTER_ERROR: " + type(exc).__name__ + ": " + str(exc) + "\\n"
+            exit_code = 2
+        with open(report_path, "w", encoding="utf-8") as report_file:
+            report_file.write(report)
+        if exit_code:
+            sys.exit(exit_code)
+        return
 ''',
     1,
 )
