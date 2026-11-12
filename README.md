@@ -14,6 +14,17 @@ LibreDWG so a separate ODA File Converter installation is not required.
 The package also contains LibreDWG's GPL-3.0-or-later licence and corresponding
 source archive, as required for redistribution of the bundled converter.
 
+## Why earlier builds opened black command windows
+
+DWG conversion is performed by LibreDWG's separate `dwg2dxf.exe` console
+program. The earlier application launched that program once per DWG without
+Windows' no-console flags, so Windows showed a black command window for every
+drawing and closed it when conversion ended.
+
+The current build uses Windows `CREATE_NO_WINDOW` and hidden startup flags.
+The converter should run silently in the background. Temporary DXF files are
+removed after each drawing is parsed, rather than being left in the temp folder.
+
 ## DWG conversion
 
 The EXE bundles LibreDWG's `dwg2dxf.exe` and DLLs. It uses LibreDWG first;
@@ -23,6 +34,15 @@ installed ODA converter should not be required by this package.
 LibreDWG currently documents approximately 90% coverage. Some complex,
 proxy, raster, or unsupported entities may not convert. The application must
 mark unreadable/incomplete drawings for manual review.
+
+## Performance notes
+
+PDF text extraction reads only the first three pages. DWG files require a
+binary CAD conversion before text can be extracted, and the application
+currently converts them sequentially, one drawing at a time. Large DWGs or
+folders containing many DWGs will therefore take longer than PDF-only folders.
+The new build removes the visible console-window flashes and cleans temporary
+conversion output; it does not make the DWG decoder itself instantaneous.
 
 ## Test and validation status
 
