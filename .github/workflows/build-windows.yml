@@ -70,6 +70,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed." }
           if (-not (Test-Path "dist/PDF and CAD Register.exe")) { throw "EXE output missing." }
 
+      - name: Verify converter is discoverable inside the built EXE
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD "dist/PDF and CAD Register.exe"
+          $diagnostic = & $exe --check-converter 2>&1
+          $diagnostic | ForEach-Object { Write-Host $_ }
+          if ($LASTEXITCODE -ne 0) { throw "The EXE cannot start its bundled LibreDWG converter." }
+          if (($diagnostic -join "`n") -notmatch "BUNDLED_CONVERTER_OK") {
+            throw "The EXE did not report BUNDLED_CONVERTER_OK. The converter was not packaged or found."
+          }
+
       - name: Assemble redistribution and licence materials
         shell: pwsh
         run: |
