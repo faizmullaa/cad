@@ -322,7 +322,7 @@ source = source.replace(
 )
 
 # Add a converter self-test at module entry so it works in PyInstaller's windowed mode.
-footer = 'if __name__ == "__main__":\\n    main()\\n'
+footer = 'if __name__ == "__main__":\n    main()\n'
 if footer not in source:
     raise SystemExit("Could not locate module entry-point footer.")
 diagnostic_entry = r'''if __name__ == "__main__":
@@ -334,10 +334,10 @@ diagnostic_entry = r'''if __name__ == "__main__":
         )
         try:
             converter, version = _check_bundled_converter()
-            report = "BUNDLED_CONVERTER_OK\\nPATH=" + converter + "\\nVERSION=" + version + "\\n"
+            report = "BUNDLED_CONVERTER_OK\nPATH=" + converter + "\nVERSION=" + version + "\n"
             exit_code = 0
         except Exception as exc:
-            report = "BUNDLED_CONVERTER_ERROR: " + type(exc).__name__ + ": " + str(exc) + "\\n"
+            report = "BUNDLED_CONVERTER_ERROR: " + type(exc).__name__ + ": " + str(exc) + "\n"
             exit_code = 2
         with open(report_path, "w", encoding="utf-8") as report_file:
             report_file.write(report)
