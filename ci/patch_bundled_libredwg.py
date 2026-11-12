@@ -107,7 +107,7 @@ def _run_libredwg_batch(converter, paths, progress=None, cancel_event=None):
                 raise Cancelled
             job_index += 1
             if progress:
-                progress(completed_files, len(paths),
+                progress(max(completed_files, 1), len(paths),
                          f"Converting DWG batch {batch_number}/{len(batches)} ({len(group)} files)")
             convert_group(group, temp_root, use_batch=True)
             completed_files += len(group)
@@ -121,7 +121,7 @@ def _run_libredwg_batch(converter, paths, progress=None, cancel_event=None):
                     raise Cancelled
                 job_index += 1
                 if progress:
-                    progress(completed_files, len(paths),
+                    progress(max(completed_files, 1), len(paths),
                              f"Converting duplicate-name DWG {job_index}/{total_jobs}")
                 output_dir = os.path.join(temp_root, f"duplicate_{duplicate_number}_{job_index}")
                 os.makedirs(output_dir, exist_ok=True)
