@@ -7,7 +7,7 @@ exe = vendor / "dwg2dxf.exe"
 if not exe.is_file():
     raise SystemExit(f"LibreDWG executable missing: {exe}")
 
-binaries = [exe, *sorted(vendor.glob("*.dll"))]
+binaries = [exe, *sorted(p for p in vendor.glob("*.dll") if p.name.casefold() != "_libredwg.dll")]
 args = [
     "--noconfirm", "--clean", "--onefile", "--windowed",
     "--name", "PDF and CAD Register",
