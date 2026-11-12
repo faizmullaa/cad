@@ -11,7 +11,7 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -28,19 +28,81 @@ jobs:
           python -c "import base64,lzma,pathlib; p=pathlib.Path('build_payload.py.xz.b64'); pathlib.Path('pdf_cad_register.py').write_bytes(lzma.decompress(base64.b64decode(p.read_text(encoding='utf-8'))))"
           python -m py_compile pdf_cad_register.py
 
-      - name: Install dependencies
+      - name: Download and verify bundled LibreDWG
+        shell: pwsh
+        run: |
+          $version = "0.14.8936"
+          $url = "https://github.com/LibreDWG/libredwg/releases/download/$version/libredwg-$version-win64.zip"
+          $archive = Join-Path $env:RUNNER_TEMP "libredwg-win64.zip"
+          $extract = Join-Path $env:RUNNER_TEMP "libredwg-extract"
+          $vendor = Join-Path $env:RUNNER_TEMP "libredwg"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          $expected = "b5675927d639ccc9054922a2efd0d2a7169fd113316e58a775511d5709c1748d"
+          if ($actual -ne $expected) { throw "LibreDWG SHA-256 verification failed: $actual" }
+          Expand-Archive -Path $archive -DestinationPath $extract -Force
+          $converter = Get-ChildItem -Path $extract -Recurse -Filter "dwg2dxf.exe" | Select-Object -First 1
+          if (-not $converter) { throw "dwg2dxf.exe was not found in the official LibreDWG archive." }
+          New-Item -ItemType Directory -Force -Path $vendor | Out-Null
+          Copy-Item $converter.FullName (Join-Path $vendor "dwg2dxf.exe")
+          Get-ChildItem -Path $extract -Recurse -Filter "*.dll" | ForEach-Object {
+            Copy-Item $_.FullName $vendor -Force
+          }
+          & (Join-Path $vendor "dwg2dxf.exe") --version
+          if ($LASTEXITCODE -ne 0) { throw "Bundled LibreDWG self-check failed." }
+          "LIBREDWG_VENDOR=$vendor" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "LIBREDWG_SOURCE=$extract" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Patch app to use bundled LibreDWG
+        run: |
+          python ci/patch_bundled_libredwg.py
+          python -m py_compile pdf_cad_register.py
+
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements_pdf_cad.txt
 
-      - name: Build executable
+      - name: Build standalone Windows EXE
+        shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name "PDF and CAD Register" --collect-all ezdxf --collect-all pymupdf --collect-all sv_ttk --hidden-import openpyxl --hidden-import pymupdf pdf_cad_register.py
+          python ci/build_windows.py "$env:LIBREDWG_VENDOR"
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed." }
+          if (-not (Test-Path "dist/PDF and CAD Register.exe")) { throw "EXE output missing." }
 
-      - name: Upload Windows EXE
+      - name: Assemble redistribution and licence materials
+        shell: pwsh
+        run: |
+          $release = "dist/release"
+          New-Item -ItemType Directory -Force -Path $release | Out-Null
+          Copy-Item "dist/PDF and CAD Register.exe" $release
+          $version = "0.14.8936"
+          $sourceUrl = "https://github.com/LibreDWG/libredwg/releases/download/$version/libredwg-$version.tar.xz"
+          $sourceArchive = Join-Path $release "libredwg-$version-source.tar.xz"
+          Invoke-WebRequest -Uri $sourceUrl -OutFile $sourceArchive
+          $sourceHash = (Get-FileHash -Algorithm SHA256 $sourceArchive).Hash.ToLowerInvariant()
+          $expectedSourceHash = "a75b6ada27a0f0b86dc62e47a21d0dbcf6bc167e0bf26926af76b81f256eace1"
+          if ($sourceHash -ne $expectedSourceHash) { throw "LibreDWG source checksum verification failed." }
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/LibreDWG/libredwg/$version/COPYING" -OutFile (Join-Path $release "COPYING-LibreDWG.txt")
+          @"
+          This distribution includes the separate LibreDWG dwg2dxf executable and its
+          required DLLs, packaged alongside this Python application and launched as
+          a separate process for DWG-to-DXF conversion.
+
+          LibreDWG version: $version
+          Project: https://github.com/LibreDWG/libredwg
+          Licence: GNU General Public License version 3 or later (GPL-3.0-or-later)
+          Corresponding source archive: libredwg-$version-source.tar.xz
+          The corresponding source archive and licence are included in this package.
+          The bundled executable's SHA-256 was verified against the official GitHub
+          release asset metadata before packaging.
+          "@ | Set-Content -Path (Join-Path $release "THIRD-PARTY-NOTICES.txt") -Encoding utf8
+          Get-ChildItem $release | Format-Table Name,Length
+
+      - name: Upload Windows EXE package
         uses: actions/upload-artifact@v4
         with:
-          name: PDF-and-CAD-Register-Windows
-          path: dist/PDF and CAD Register.exe
+          name: PDF-and-CAD-Register-Windows-Standalone
+          path: dist/release/
           if-no-files-found: error
           retention-days: 30
