@@ -314,13 +314,19 @@ source = replace_between(
     make_register,
 )
 
-# Add an explicit packaged-runtime diagnostic used by CI and support.
-main_marker = "def main():\n"
-if main_marker not in source:
-    raise SystemExit("Could not locate main() entry point.")
+# The worker must pass its cancellation flag down to the batch converter.
 source = source.replace(
-    main_marker,
-    main_marker + '''    if len(sys.argv) > 1 and sys.argv[1] == "--check-converter":
+    'make_register(folder, progress, recursive)))',
+    'make_register(folder, progress, recursive, self.stop)))',
+    1,
+)
+
+# Add a converter self-test at module entry so it works in PyInstaller's windowed mode.
+footer = 'if __name__ == "__main__":\\n    main()\\n'
+if footer not in source:
+    raise SystemExit("Could not locate module entry-point footer.")
+diagnostic_entry = r'''if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--check-converter":
         import tempfile
         report_path = (
             sys.argv[2] if len(sys.argv) > 2
@@ -335,22 +341,15 @@ source = source.replace(
             exit_code = 2
         with open(report_path, "w", encoding="utf-8") as report_file:
             report_file.write(report)
-        if exit_code:
-            sys.exit(exit_code)
-        return
-''',
-    1,
-)
-
-# The worker must pass its cancellation flag down to the batch converter.
-source = source.replace(
-    'make_register(folder, progress, recursive)))',
-    'make_register(folder, progress, recursive, self.stop)))',
-    1,
-)
+        sys.exit(exit_code)
+    main()
+'''
+source = source.replace(footer, diagnostic_entry, 1)
 
 if "No compatible DWG converter was found" in source or "ODA File Converter was not detected" in source:
     raise SystemExit("Old ODA/PATH fallback text remains after patch.")
+if 'sys.argv[1] == "--check-converter"' not in source:
+    raise SystemExit("Converter self-test handler was not inserted.")
 
 compile(source, str(source_path), "exec")
 source_path.write_text(source, encoding="utf-8")
