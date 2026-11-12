@@ -54,9 +54,15 @@ jobs:
           "LIBREDWG_SOURCE=$extract" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Patch app to use bundled LibreDWG
+        shell: pwsh
         run: |
           python ci/patch_bundled_libredwg.py
           python -m py_compile pdf_cad_register.py
+          $source = Get-Content "pdf_cad_register.py" -Raw
+          if ($source -notmatch 'BUNDLED_CONVERTER_OK') { throw "Converter diagnostic handler was not patched into source." }
+          if ($source -match 'No compatible DWG converter was found|ODA File Converter was not detected') {
+            throw "Legacy ODA/PATH fallback text remains in source."
+          }
 
       - name: Install Python dependencies
         run: |
@@ -74,16 +80,15 @@ jobs:
         shell: pwsh
         run: |
           $exe = Join-Path $PWD "dist/PDF and CAD Register.exe"
-          $report = Join-Path $env:RUNNER_TEMP "bundled-converter-check.txt"
+          $report = Join-Path $env:RUNNER_TEMP "converter-check.txt"
           Remove-Item $report -ErrorAction SilentlyContinue
-          & $exe --check-converter $report
-          $exitCode = $LASTEXITCODE
+          $process = Start-Process -FilePath $exe -ArgumentList @("--check-converter", $report) -Wait -PassThru -WindowStyle Hidden
           if (-not (Test-Path $report)) {
-            throw "The EXE did not write its converter diagnostic file. Exit code: $exitCode"
+            throw "The EXE exited with code $($process.ExitCode) but did not write its converter diagnostic file."
           }
           $diagnostic = Get-Content $report -Raw
           Write-Host $diagnostic
-          if ($exitCode -ne 0 -or $diagnostic -notmatch "BUNDLED_CONVERTER_OK") {
+          if ($process.ExitCode -ne 0 -or $diagnostic -notmatch "BUNDLED_CONVERTER_OK") {
             throw "The packaged EXE could not locate and start its bundled LibreDWG converter."
           }
 
