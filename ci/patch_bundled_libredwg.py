@@ -52,6 +52,7 @@ def _run_libredwg_batch(converter, paths, progress=None, cancel_event=None):
 
     total_jobs = len(batches) + sum(len(group) for group in duplicate_groups)
     job_index = 0
+    completed_files = 0
 
     with tempfile.TemporaryDirectory(prefix="cad_register_batch_") as temp_root:
         def convert_group(group, output_dir, use_batch):
@@ -106,9 +107,13 @@ def _run_libredwg_batch(converter, paths, progress=None, cancel_event=None):
                 raise Cancelled
             job_index += 1
             if progress:
-                progress(job_index, max(total_jobs, 1),
+                progress(completed_files, len(paths),
                          f"Converting DWG batch {batch_number}/{len(batches)} ({len(group)} files)")
             convert_group(group, temp_root, use_batch=True)
+            completed_files += len(group)
+            if progress:
+                progress(completed_files, len(paths),
+                         f"Converted {completed_files} of {len(paths)} DWG files")
 
         for duplicate_number, group in enumerate(duplicate_groups, 1):
             for original in group:
@@ -116,11 +121,15 @@ def _run_libredwg_batch(converter, paths, progress=None, cancel_event=None):
                     raise Cancelled
                 job_index += 1
                 if progress:
-                    progress(job_index, max(total_jobs, 1),
+                    progress(completed_files, len(paths),
                              f"Converting duplicate-name DWG {job_index}/{total_jobs}")
                 output_dir = os.path.join(temp_root, f"duplicate_{duplicate_number}_{job_index}")
                 os.makedirs(output_dir, exist_ok=True)
                 convert_group([original], output_dir, use_batch=False)
+                completed_files += 1
+                if progress:
+                    progress(completed_files, len(paths),
+                             f"Converted {completed_files} of {len(paths)} DWG files")
 
     return results
 
