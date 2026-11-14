@@ -468,6 +468,33 @@ def read_wir_pdf(path):
         if not subject:
             subject = _wir_scope_and_checklist(pages)
 
+        # Some WIR PDFs have blank cover pages and attach the originating
+        # drawing or test report later in the pack. Search later pages only
+        # when the cover did not provide a subject.
+        if not subject:
+            for page_index in range(3, pdf.page_count):
+                later_page = pdf[page_index]
+                later_text = later_page.get_text("text")
+                letter_match = re.search(
+                    r"\bSUBJ(?:ECT)?\s*:\s*(.+?)(?=\n\s*Dear\s+(?:Sir|Madam)\b|\Z)",
+                    later_text,
+                    re.I | re.S,
+                )
+                if letter_match:
+                    subject = re.sub(r"\s+", " ", letter_match.group(1)).strip(" :-")
+                if not subject:
+                    raw = later_page.get_text("words")
+                    for rotation in EXTRA_ROTATIONS:
+                        later_words = page_words(raw, later_page, rotation)
+                        title_block = find_title_block(later_words)
+                        if title_block:
+                            drawing_info = read_drawing(later_words, *title_block)
+                            subject = drawing_info.get("title", "").strip()
+                            if subject:
+                                break
+                if subject:
+                    break
+
         rev_match = re.search(r"\bRevision\s+No\.?\s*:\s*([A-Z0-9]+)", all_text, re.I)
         if not rev_match:
             rev_match = re.search(r"\bRev\.?\s*([A-Z0-9]+)", all_text, re.I)
