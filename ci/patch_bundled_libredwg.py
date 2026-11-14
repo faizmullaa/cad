@@ -546,6 +546,70 @@ def read_pdf(path):
         return {"error": "No readable text in the PDF (scanned image?) - check manually."}
     return {}
 '''
+
+wir_fallbacks = r'''
+def _wir_subj_from_pages(pages):
+    """Read the multi-line SUBJ field used by laboratory/test-report attachments."""
+    for page in pages:
+        text = _normalise_pdf_id_text(page.get_text("text"))
+        match = re.search(r"\bSUBJ\s*:\s*(.*?)\n\s*Dear\s+Sir\b", text, re.I | re.S)
+        if match:
+            subject = re.sub(r"\s+", " ", match.group(1)).strip(" :.-")
+            if subject:
+                return subject
+    return ""
+
+
+def _wir_drawing_title_from_pages(pages):
+    """Use a readable attached drawing title block when the WIR cover is scanned."""
+    for page in pages:
+        raw = page.get_text("words")
+        if not raw:
+            continue
+        for rotation in EXTRA_ROTATIONS:
+            words = page_words(raw, page, rotation)
+            block = find_title_block(words)
+            if block:
+                info = read_drawing(words, *block)
+                title = re.sub(r"\s+", " ", info.get("title", "")).strip()
+                if title:
+                    return title
+    return ""
+'''
+
+if "wir_block = wir_block.replace(" not in patcher if False else False:
+    pass
+wir_block = wir_block.replace(
+    "def read_wir_pdf(path):",
+    wir_fallbacks + "\n\ndef read_wir_pdf(path):",
+    1,
+)
+wir_block = wir_block.replace(
+    "pages = [pdf[index] for index in range(min(3, pdf.page_count))]",
+    "pages = [pdf[index] for index in range(min(12, pdf.page_count))]",
+    1,
+)
+wir_block = wir_block.replace(
+    "subject = _wir_description_from_pages(pages)\n        if not subject:\n            subject = _wir_scope_and_checklist(pages)",
+    "subject = _wir_description_from_pages(pages[:3])\n"
+    "        if not subject:\n"
+    "            subject = _wir_subj_from_pages(pages)\n"
+    "        if not subject:\n"
+    "            subject = _wir_scope_and_checklist(pages)\n"
+    "        if not subject:\n"
+    "            subject = _wir_drawing_title_from_pages(pages)",
+    1,
+)
+wir_block = wir_block.replace(
+    'rev_match = re.search(r"\\bRevision\\s+No\\.?\\s*:\\s*([A-Z0-9]+)", all_text, re.I)\n'
+    '        if not rev_match:\n'
+    '            rev_match = re.search(r"\\bRev\\.?\\s*([A-Z0-9]+)", all_text, re.I)',
+    'rev_match = re.search(r"\\bRevision\\s+No\\.?\\s*:?\\s*([A-Z0-9]{1,3})\\b", all_text, re.I)\n'
+    '        if not rev_match:\n'
+    '            rev_match = re.search(r"\\bRev\\.?\\s+No\\.?\\s*:?\\s*([A-Z0-9]{1,3})\\b", all_text, re.I)',
+    1,
+)
+
 source = replace_between(
     source,
     "def read_pdf(path):",
