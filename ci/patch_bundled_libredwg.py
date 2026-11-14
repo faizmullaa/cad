@@ -346,6 +346,193 @@ diagnostic_entry = r'''if __name__ == "__main__":
 '''
 source = source.replace(footer, diagnostic_entry, 1)
 
+
+# Add the WIR-specific SAAD identifier expression.
+source = source.replace(
+    'DOC_NO_RE = re.compile(r"SAAD-[A-Z0-9]+(?:[-_.][A-Z0-9]+)*", re.I)\n',
+    'DOC_NO_RE = re.compile(r"SAAD-[A-Z0-9]+(?:[-_.][A-Z0-9]+)*", re.I)\n'
+    'WIR_DOC_NO_RE = re.compile(r"\\bSAAD-[A-Z0-9]+(?:-[A-Z0-9]+)*-WIR-[A-Z0-9]+(?:-[A-Z0-9]+)*\\b", re.I)\n',
+    1,
+)
+
+wir_block = r'''
+def _normalise_pdf_id_text(text):
+    """Normalise PDF soft hyphens and typographic dashes in SAAD document IDs."""
+    text = str(text or "")
+    for dash in ("\u00ad", "\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2212"):
+        text = text.replace(dash, "-")
+    return re.sub(r"(?<=\w)\s*-\s*(?=\w)", "-", text)
+
+
+def _wir_page_lines(page):
+    """Return text lines with page coordinates for WIR description-field extraction."""
+    grouped = {}
+    for word in page.get_text("words"):
+        if len(word) < 8:
+            continue
+        key = (word[5], word[6])
+        grouped.setdefault(key, []).append(word)
+    lines = []
+    for values in grouped.values():
+        values.sort(key=lambda item: item[0])
+        lines.append({
+            "y0": min(item[1] for item in values),
+            "y1": max(item[3] for item in values),
+            "x0": min(item[0] for item in values),
+            "text": " ".join(str(item[4]) for item in values).strip(),
+        })
+    return sorted(lines, key=lambda item: (item["y0"], item["x0"]))
+
+
+def _wir_description_from_pages(pages):
+    """Read the free-text DESCRIPTION value printed above the DESCRIPTION label."""
+    excluded = (
+        "CHECKLIST FOR", "SAAD", "HDC-HTC", "SITE ENGINEER", "HATCO QAQC",
+        "CLIENT QAQC", "CONSULTANT", "EDARAT", "SIGNATURE", "APPROVAL",
+        "DATE:", "NAME:", "CH NO", "CHK NO", "S/N", "DESCRIPTION",
+        "LOCATION OF WORK", "CONTRACTOR", "PROJECT", "HATCO", "WSP",
+        "CONFORMED", "NOT", "N/A",
+    )
+    for page in pages[:3]:
+        lines = _wir_page_lines(page)
+        labels = [line for line in lines if norm(line["text"].rstrip(":")) == "description"]
+        for label in labels:
+            candidates = []
+            for line in lines:
+                distance = label["y0"] - line["y1"]
+                text = re.sub(r"\s+", " ", line["text"]).strip(" :")
+                upper = text.upper()
+                if not (4 <= distance <= 95) or len(text) < 5:
+                    continue
+                if any(term in upper for term in excluded):
+                    continue
+                if re.fullmatch(r"[\W\d_]+", text):
+                    continue
+                if re.search(r"^PAGE\s+\d+\s+OF\s+\d+$", text, re.I):
+                    continue
+                candidates.append((distance, text))
+            if candidates:
+                candidates.sort(key=lambda item: item[0])
+                return candidates[0][1]
+    return ""
+
+
+def _wir_scope_and_checklist(pages):
+    """Build a meaningful fallback subject from the ITP scope and WIR checklist title."""
+    all_text = "\n".join(page.get_text("text") for page in pages[:3])
+    lines = [re.sub(r"\s+", " ", line).strip() for line in all_text.splitlines()]
+    scope = ""
+    for index, line in enumerate(lines):
+        match = re.search(r"SCOPE\s+OF\s+WORK\s*:?\s*(.*)$", line, re.I)
+        if not match:
+            continue
+        scope = match.group(1).strip(" :-")
+        if not scope:
+            for following in lines[index + 1:index + 5]:
+                candidate = following.strip(" :-")
+                if candidate and not re.search(r"^(LEGEND|ITP\s+NO|REVISION\s+NO|H\s*[–-]\s*HOLD)", candidate, re.I):
+                    scope = candidate
+                    break
+        if scope:
+            break
+
+    checklist = ""
+    for line in lines:
+        match = re.search(r"\bCHECKLIST\s+FOR\s+(.+)$", line, re.I)
+        if match:
+            checklist = match.group(1).strip(" :-")
+            break
+
+    if scope and checklist:
+        return f"{scope} - {checklist}"
+    return scope or checklist
+
+
+def read_wir_pdf(path):
+    """WIR packs use a checklist/ITP cover, not the normal Subject title-block layout."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    with fitz.open(path) as pdf:
+        if pdf.needs_pass:
+            return {"error": "PDF is password protected - check manually."}
+
+        pages = [pdf[index] for index in range(min(3, pdf.page_count))]
+        page_texts = [page.get_text("text") for page in pages]
+        all_text = _normalise_pdf_id_text("\n".join(page_texts))
+
+        printed_numbers = WIR_DOC_NO_RE.findall(all_text)
+        doc_no = printed_numbers[0].upper() if printed_numbers else ""
+        if not doc_no and re.search(r"-WIR-", stem, re.I):
+            doc_no = stem.upper()
+
+        subject = _wir_description_from_pages(pages)
+        if not subject:
+            subject = _wir_scope_and_checklist(pages)
+
+        rev_match = re.search(r"\bRevision\s+No\.?\s*:\s*([A-Z0-9]+)", all_text, re.I)
+        if not rev_match:
+            rev_match = re.search(r"\bRev\.?\s*([A-Z0-9]+)", all_text, re.I)
+        revision = rev_match.group(1).upper() if rev_match else ""
+
+        return {
+            "kind": "document",
+            "doc_no": doc_no,
+            "subject": subject,
+            "rev": revision,
+            "date": "",
+            "doc_no_source": "PDF" if printed_numbers else ("filename" if doc_no else ""),
+        }
+
+
+def read_pdf(path):
+    name = os.path.basename(path).upper()
+    if "-WIR-" in name:
+        return read_wir_pdf(path)
+
+    any_text = False
+    with fitz.open(path) as pdf:
+        if pdf.needs_pass:
+            return {"error": "PDF is password protected - check manually."}
+        for page in pdf.pages(0, min(PAGES_TO_SEARCH, pdf.page_count)):
+            raw = page.get_text("words")
+            if not raw:
+                continue
+            any_text = True
+            drawing = doc_words = None
+            for rot in EXTRA_ROTATIONS:
+                words = page_words(raw, page, rot)
+                if drawing is None:
+                    block = find_title_block(words)
+                    if block:
+                        drawing = (words, *block)
+                if doc_words is None and find_labels(words, "Subject"):
+                    doc_words = words
+            if drawing and doc_words:
+                return read_drawing(*drawing) if re.search(r"-(DWG|SDW)-", name) else read_document(doc_words)
+            if drawing:
+                return read_drawing(*drawing)
+            if doc_words:
+                return read_document(doc_words)
+            words = page_words(raw, page, 0)
+            if any(DOC_NO_RE.search(w.text) for w in words):
+                return read_document(words)
+    if not any_text:
+        return {"error": "No readable text in the PDF (scanned image?) - check manually."}
+    return {}
+'''
+source = replace_between(
+    source,
+    "def read_pdf(path):",
+    "def _entity_text(entity):",
+    wir_block,
+)
+
+source = source.replace(
+    '("Document No. (in PDF / DWG)", 36, "doc_no"),',
+    '("Document No. (PDF / filename)", 36, "doc_no"),',
+    1,
+)
+
+
 if "No compatible DWG converter was found" in source or "ODA File Converter was not detected" in source:
     raise SystemExit("Old ODA/PATH fallback text remains after patch.")
 if 'sys.argv[1] == "--check-converter"' not in source:
