@@ -371,6 +371,36 @@ def _wir_scope_and_checklist(pages):
     return scope or checklist
 
 
+
+def _wir_subj_from_pages(pages):
+    """Read the multi-line SUBJ field used by laboratory/test-report attachments."""
+    for page in pages:
+        text = _normalise_pdf_id_text(page.get_text("text"))
+        match = re.search(r"\bSUBJ\s*:\s*(.*?)\n\s*Dear\s+Sir\b", text, re.I | re.S)
+        if match:
+            subject = re.sub(r"\s+", " ", match.group(1)).strip(" :.-")
+            if subject:
+                return subject
+    return ""
+
+
+def _wir_drawing_title_from_pages(pages):
+    """Use a readable attached drawing title block when the WIR cover is scanned."""
+    for page in pages:
+        raw = page.get_text("words")
+        if not raw:
+            continue
+        for rotation in EXTRA_ROTATIONS:
+            words = page_words(raw, page, rotation)
+            block = find_title_block(words)
+            if block:
+                info = read_drawing(words, *block)
+                title = re.sub(r"\s+", " ", info.get("title", "")).strip()
+                if title:
+                    return title
+    return ""
+
+
 def read_wir_pdf(path):
     """WIR packs use a checklist/ITP cover, not the normal Subject title-block layout."""
     stem = os.path.splitext(os.path.basename(path))[0]
@@ -378,7 +408,7 @@ def read_wir_pdf(path):
         if pdf.needs_pass:
             return {"error": "PDF is password protected - check manually."}
 
-        pages = [pdf[index] for index in range(min(3, pdf.page_count))]
+        pages = [pdf[index] for index in range(min(12, pdf.page_count))]
         page_texts = [page.get_text("text") for page in pages]
         all_text = _normalise_pdf_id_text("\n".join(page_texts))
 
@@ -387,9 +417,13 @@ def read_wir_pdf(path):
         if not doc_no and re.search(r"-WIR-", stem, re.I):
             doc_no = stem.upper()
 
-        subject = _wir_description_from_pages(pages)
+        subject = _wir_description_from_pages(pages[:3])
+        if not subject:
+            subject = _wir_subj_from_pages(pages)
         if not subject:
             subject = _wir_scope_and_checklist(pages)
+        if not subject:
+            subject = _wir_drawing_title_from_pages(pages)
 
         # Some WIR PDFs have blank cover pages and attach the originating
         # drawing or test report later in the pack. Search later pages only
@@ -418,9 +452,9 @@ def read_wir_pdf(path):
                 if subject:
                     break
 
-        rev_match = re.search(r"\bRevision\s+No\.?\s*:\s*([A-Z0-9]+)", all_text, re.I)
+        rev_match = re.search(r"\bRevision\s+No\.?\s*:?\s*([A-Z0-9]{1,3})\b", all_text, re.I)
         if not rev_match:
-            rev_match = re.search(r"\bRev\.?\s*([A-Z0-9]+)", all_text, re.I)
+            rev_match = re.search(r"\bRev\.?\s+No\.?\s*:?\s*([A-Z0-9]{1,3})\b", all_text, re.I)
         revision = rev_match.group(1).upper() if rev_match else ""
 
         return {
